@@ -1,11 +1,10 @@
 # Auth Triage Script
 
-## Testing notes
+## Portability Notes
 
-Hmm, running this on my system shows:
-```
-      3 52056
-      1 ;
-```
+This script assumes **Linux with GNU grep**. Known limitations:
+- macOS: requires `brew install grep` and using `ggrep -P`
+- OpenBSD: log path is `/var/log/authlog` not `auth.log`
+- BSD systems: grep lacks `-P` flag - use awk fallback
 
-That's the port number, not the IP! Need to fix the column number.
+See commit history for cross-platform branch.
