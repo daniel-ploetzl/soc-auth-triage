@@ -1,19 +1,49 @@
-# Auth Triage Script
+# SSH Auth Triage Script
 
-Perl regex, instead of 'awk', is cleaner:
-  grep -oP 'from \K[\d.]+'
+Quick analysis of SSH authentication logs. Shows failed login attempts and potential brute-force sources.
 
-\K is a 'keep' assertion - matches 'from ' but doesn't include it.
-[\d.]+ captures the IP address.
+## Usage
+```bash
+# Analyze default system log
+./auth-triage.sh
 
-Trade-off: requires GNU grep (not portable to BSD). Acceptable for
-Linux-focused SOC work."
+# Analyze specific log file
+./auth-triage.sh <path_to_log_file>
+```
 
-## Portability Notes
+## What it does
 
-This script assumes **Linux with GNU grep**. Known limitations:
-- macOS: requires `brew install grep` and using `ggrep -P`
-- OpenBSD: log path is `/var/log/authlog` not `auth.log`
-- BSD systems: grep lacks `-P` flag - use awk fallback
+- Extracts top source IPs attempting failed SSH logins
+- Uses threshold-based detection for brute-force attempts (>10 failures)
+- Outputs sorted results (highest attempt count first)
 
-See commit history for cross-platform branch.
+## How it works
+
+Pipeline: `grep | grep -oP | sort | uniq -c | sort -nr | head`
+
+Uses Perl regex (`grep -P`) for cleaner IP extraction:
+- `\K` = discard matched text before this point
+- `\d` = digit shorthand
+
+## Testing
+
+Tested on Ubuntu 22.04 with live logs and sample data.
+
+## Known issues/limitations
+
+- Requires GNU grep with `-P` flag (doesn't work on macOS/BSD by default)
+- No support for compressed logs (`.gz` files)
+- Assumes standard syslog format
+
+## What I learned
+
+- Bash parameter expansion: `${1:-default}` for optional arguments
+- PCRE `\K` assertion
+- `set -euo pipefail`: requires `|| true` for grep with no matches
+
+## TODO
+
+- [ ] Add username extraction
+- [ ] Add timestamp analysis
+- [ ] Handle compressed logs
+- [ ] Support journalctl input mode
