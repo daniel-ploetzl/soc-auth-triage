@@ -3,7 +3,7 @@
 # soc-auth-triage.sh
 #
 # Purpose:
-#   Quick SOC-style triage of SSH authentication logs for failed login attempts
+#   Quick SOC-style triage of authentication logs for failed login attempts
 #   and brute-force detection patterns.
 #
 # Usage:
@@ -13,6 +13,7 @@
 # Output:
 #   - Top source IPs attempting failed SSH logins
 #   - Top targeted usernames (including invalid users)
+#   - Attack timeline
 #
 # Technical Notes:
 #   Uses grep -P (Perl regex) for pattern extraction. Requires GNU grep.
@@ -30,7 +31,7 @@ if [[ ! -r "$LOG_FILE" ]]; then
 fi
 
 printf "\n======= soc-auth-triage =======\n"
-printf "SSH Authentication Log Analysis\n"
+printf "* Authentication Log Analysis * \n"
 printf "===============================\n"
 printf "Log file: %s\n" "$LOG_FILE"
 printf "===============================\n\n"
@@ -56,5 +57,13 @@ grep "Failed password" "$LOG_FILE" \
 	| grep -oP 'for (?:invalid user )?\K\S+(?= from)' \
 	| sort | uniq -c | sort -nr | head -n "$TOP_N"
 ) || printf "    (none found)\n"
+
+printf "\n[*] Attack timeline (by hour):\n"
+(
+grep "Failed password" "$LOG_FILE" \
+	| grep -oP '^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}' \
+	| sort | uniq -c | sort -nr | head -n "$TOP_N" \
+) || printf "      (none found)\n"
+
 
 printf "\n======= End of analysis =======\n"

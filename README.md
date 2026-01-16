@@ -44,10 +44,6 @@ Analyzes SSH authentication logs to identify failed login attempts, potential br
 - Ubuntu 22.04 LTS (live system logs)
 - Sample auth.log data (included in `samples/`)
 
-**Test command:**
-```bash
-./soc-auth-triage.sh samples/auth.log
-```
 ## Known limitations
 
 - Requires GNU grep with `-P` flag (doesn't work on macOS/BSD by default)
@@ -64,9 +60,11 @@ Analyzes SSH authentication logs to identify failed login attempts, potential br
 
 ## TODO
 
-- [ ] Add successful login tracking
-- [ ] Implement timestamp-based clustering analysis
+- [x] Extract top source IPs
+- [x] Extract targeted usernames
+- [ ] Implement timestamp-based attack clustering
 - [ ] Support compressed log files (`.gz`, `.bz2`)
+- [ ] Add successful login tracking (failed -> success = potential breach)
+- [ ] Export results to JSON/CSV format for reporting
 - [ ] Add journalctl input mode for systemd systems
-- [ ] Export results to JSON/CSV format
 - [ ] Add GeoIP lookup for source IPs
