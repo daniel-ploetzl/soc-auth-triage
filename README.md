@@ -1,17 +1,14 @@
 # soc-auth-triage
 
-SSH authentication log analyzer for Security Operations Center (SOC) triage workflows.
-
-## Overview
-
-Analyzes SSH authentication logs to identify failed login attempts, potential brute-force attacks, and credential stuffing patterns. Built as a practical tool for incident response and security monitoring.
+Authentication log analysis script for security inspection. Identifies failed login attempts, potential brute-force patterns, and attack timing from system authentication logs.
 
 ## Features
 
 - **Source IP analysis** - Identifies top attacking IPs
 - **Username enumeration** - Shows targeted accounts (including invalid users)
 - **Pattern-based detection** - Uses Perl regex for accurate log parsing
-- **Flexible input** - Analyzes system logs or custom files
+- **Flexible input** - Analyzes standard Linux auth logs (`/var/log/auth.log`) or custom files
+- **Time-based attack clustering** - Displays attack timeline by hour (identifies attack patterns)
 
 ## Usage
 ```bash
@@ -24,7 +21,10 @@ Analyzes SSH authentication logs to identify failed login attempts, potential br
 # Analyze sample data
 ./soc-auth-triage.sh samples/auth.log
 ```
+
 ## How it works
+
+Uses grep with Perl regex to extract patterns from authentication logs.
 
 **Pipeline:** `grep | grep -oP | sort | uniq -c | sort -nr | head`
 
@@ -37,6 +37,9 @@ Analyzes SSH authentication logs to identify failed login attempts, potential br
   - `\K` = discard matched prefix
   - `\S+` = capture username
   - `(?= from)` = ensure " from" follows
+- **Timeline extraction:** `^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}` - extracts Month Day Hour from syslog timestamps
+
+Output formatted with single awk line per section for consistency.
 
 ## Testing
 
@@ -50,19 +53,22 @@ Analyzes SSH authentication logs to identify failed login attempts, potential br
 - No support for compressed logs (`.gz` files) yet
 - Assumes standard syslog format
 - IPv6 addresses not tested
+- Currently focuses on SSH failed password events only
 
 ## What I learned
 
-- **Bash parameter expansion:** `${1:-default}` for optional arguments with defaults
-- **PCRE assertions:** `\K` for cleaner pattern extraction vs. capture groups
-- **Error handling:** `set -euo pipefail` + `|| true` pattern for non-fatal grep failures
-- **Regex efficiency:** Perl regex is more readable than complex awk loops for this use case
+- Perl regex `\K` assertion for cleaner extraction than capture groups
+- `(?:...)` non-capturing groups for optional patterns
+- Positive lookahead `(?= ...)` to ensure context without consuming it
+- `set -euo pipefail` + `|| printf` pattern for graceful error handling
+- Consistent output formatting improves readability for security inspection
+- Timestamp extraction from syslog format without external date parsing
 
 ## TODO
 
 - [x] Extract top source IPs
 - [x] Extract targeted usernames
-- [ ] Implement timestamp-based attack clustering
+- [x] Implement timestamp-based attack clustering
 - [ ] Support compressed log files (`.gz`, `.bz2`)
 - [ ] Add successful login tracking (failed -> success = potential breach)
 - [ ] Export results to JSON/CSV format for reporting
