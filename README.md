@@ -1,6 +1,6 @@
 # soc-auth-triage
 
-Authentication log analysis script for security inspection. Identifies failed login attempts, potential brute-force patterns, and attack timing from system authentication logs.
+Authentication log analysis script for security inspection. Identifies failed login attempts, potential brute-force patterns, and compromised accounts from system authentication logs.
 
 ## Usage
 ```bash
@@ -20,6 +20,7 @@ sudo journalctl -u ssh --since "24 hours ago" > /tmp/ssh.log
 - Shows top source IPs attempting failed SSH logins
 - Lists targeted usernames (including invalid users)
 - Displays attack timeline by hour (identifies attack patterns)
+- **Detects potential compromises** (IPs with failed attempts that later succeeded)
 - Works with modern systemd and legacy syslog formats
 
 ## Output Example (Production VPS)
@@ -62,23 +63,33 @@ Log file: /var/log/auth.log
   2026-01-19T10:00: 128 attempts
   2026-01-19T11:00: 127 attempts
 
+[*] Potential compromises (failed then successful login):
+  100.65.0.9: 3 failed, then SUCCESS at 2026-01-18T14:23
+
 ======= End of summary ========
 ```
 
 ## How it works
 
-Uses grep with Perl regex to extract patterns from authentication logs. Handles both modern systemd (RFC3339 timestamps) and legacy syslog formats.
+Uses grep with basic regex to extract patterns from authentication logs. Correlates failed and successful login events to identify potential security incidents.
 
 **Detection patterns:**
-- **Modern (systemd):** `Connection closed by authenticating user ... [preauth]`
-- **Legacy:** `Failed password for ... from ...`
+- **Failed attempts (modern):** `Connection closed by authenticating user ... [preauth]`
+- **Failed attempts (legacy):** `Failed password for ... from ...`
+- **Successful logins:** `Accepted password` or `Accepted publickey`
 
-**Extraction patterns:**
-- **IP extraction:** `(from |user \w+ )\K[\d.]+(?= port)` - grabs IP before "port"
-- **Username extraction:** `(for (?:invalid user )?|authenticating user )\K\w+` - handles both formats
-- **Timestamp extraction:** `^(\d{4}-\d{2}-\d{2}T\d{2}|[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2})` - RFC3339 or syslog
+**Extraction approach:**
+- **IP extraction:** `grep -o 'from [0-9.]*' | cut -d' ' -f2` - simple grep and cut
+- **Username extraction:** Handles both modern and legacy format with alternation
+- **Timestamp rounding:** `cut -c1-16 | sed 's/:...*/:00/'` - extract first 16 chars, round to hour
 
-All sections follow the same pipeline: `grep | grep -oP | sort | uniq -c | sort -nr | head`.
+**Correlation logic:**
+1. Extract IPs with successful logins
+2. Check each IP for prior failed attempts
+3. Report IPs that failed then succeeded (potential compromise)
+4. Uses process substitution to avoid subshell variable issues
+
+All sections use consistent simple tools: grep, cut, sed, sort, uniq, awk.
 
 ## System Compatibility
 
@@ -116,6 +127,7 @@ Tested on:
 - No support for compressed logs (`.gz` files) - decompress first
 - Currently focuses on SSH authentication events only
 - IPv6 addresses not tested
+- Correlation assumes chronological log order
 
 ## What I learned
 
@@ -123,17 +135,21 @@ Tested on:
 - Systemd can log to files OR journalctl-only (system-dependent)
 - fail2ban blocks attempts before they log as "Failed password"
 - Pattern matching must handle "Connection closed... [preauth]" for modern systems
-- Perl regex `\K` and lookaheads work across different log formats
-- Single grep pattern can match multiple log message types with `|`
+- Correlating different event types requires simple iteration with process substitution
+- Process substitution `< <(...)` avoids subshell variable scope issues
+- Successful logins after failures indicate potential brute-force success
+- Simple tools (grep, cut, sed) are often clearer than complex regex
+- Single sed pattern `s/:...*/:00/` works for both timestamp formats
+- `grep -c` is cleaner than piping to `wc -l`
 
 ## TODO
 
 - [x] Extract top source IPs
 - [x] Extract targeted usernames
 - [x] Implement timestamp-based attack clustering
+- [x] Successful login correlation (failed → success = potential breach)
 - [x] Document journalctl export workaround for systemd-only systems
 - [ ] Support compressed log files (`.gz`, `.bz2`)
-- [ ] Add successful login tracking (failed -> success = potential breach)
 - [ ] Export results to JSON/CSV format for reporting
 - [ ] Add GeoIP lookup for source IPs
 - [ ] IPv6 support
