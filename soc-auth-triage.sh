@@ -4,7 +4,7 @@
 #
 # Purpose:
 #   Authentication log analysis for security inspection. Identifies failed login
-#   attempts, brute-force patterns, and attack timing from system auth logs.
+#   attempts, brute-force patterns, attack timing, and potential compromises.
 #
 # Usage:
 #   ./soc-auth-triage.sh                  # analyzes /var/log/auth.log
@@ -14,6 +14,7 @@
 #   - Top source IPs attempting failed SSH logins
 #   - Top targeted usernames (including invalid users)
 #   - Attack timeline by hour
+#   - Potential compromises (IPs with failed attempts that later succeeded)
 #
 # Technical Notes:
 #   Uses grep -P (Perl regex) for pattern extraction. Requires GNU grep.
@@ -44,7 +45,7 @@ printf "[*] Top failed SSH source IPs:\n"
 	grep -E "(Failed password|Connection closed by authenticating user.*\[preauth\])" "$LOG_FILE" \
 		| grep -oP '(from |user \w+ )\K[\d.]+(?= port)' \
 		| sort | uniq -c | sort -nr | head -n "$TOP_N" \
-		| awk '{printf "  %s: %d attempts\n", $2, $1}'
+		| awk '{printf "  %s: %d attempt(s)\n", $2, $1}'
 ) || printf "    (none found)\n"
 
 printf "\n[*] Top targeted usernames:\n"
@@ -55,19 +56,50 @@ printf "\n[*] Top targeted usernames:\n"
 	grep -E "(Failed password|Connection closed by authenticating user.*\[preauth\])" "$LOG_FILE" \
 		| grep -oP '(for (?:invalid user )?|authenticating user )\K\w+(?= )' \
 		| sort | uniq -c | sort -nr | head -n "$TOP_N" \
-		| awk '{printf "  %s: %d attempts\n", $2, $1}'
+		| awk '{printf "  %s: %d attempt(s)\n", $2, $1}'
 ) || printf "    (none found)\n"
 
 printf "\n[*] Attack timeline (by hour):\n"
-# Handle both timestamp formats:
-# RFC3339 (modern): 2026-01-18T00:00:11.966856+01:00
-# Syslog (legacy): Jan 18 00:00:11
+# Extract timestamp and round to hour
 (
-	grep -E "(Failed password|Connection closed by authenticating user.*\[preauth\])" "$LOG_FILE" \
-		| grep -oP '^(\d{4}-\d{2}-\d{2}T\d{2}|[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2})' \
-		| sed -E 's/T([0-9]{2}).*/T\1:00/; s/^([A-Z][a-z]{2}\s+[0-9]+\s+)([0-9]{2}).*/\1\2:00/' \
+	grep -E "(Failed password|Connection closed.*\[preauth\])" "$LOG_FILE" \
+		| cut -c1-16 \
+		| sed 's/:...*/:00/' \
 		| sort | uniq -c | sort -nr | head -n "$TOP_N" \
-		| awk '{printf "  %s: %d attempts\n", $2, $1}'
+		| awk '{printf "  %s: %d attempt(s)\n", $2, $1}'
 ) || printf "    (none found)\n"
+
+printf "\n[*] Potential compromises (failed then successful login):\n"
+# Correlate failed attempts with successful logins from same IP
+# Indicates potential brute-force success or credential stuffing
+(
+	found=0
+
+	while read -r ip; do
+		# Count failed attempts from this IP
+		failed=$(
+			grep -E "(Failed password|Connection closed.*\[preauth\])" \
+				"$LOG_FILE" \
+				| grep -c "$ip" \
+				# | grep "$ip" \
+				# | wc -l
+	)
+
+	if [[ "$failed" -gt 0 ]]; then
+		# Get timestamp from successful login (first 16 chars)
+		time=$(grep -E "Accepted.*from $ip" "$LOG_FILE" \
+			| head -1 \
+			| cut -c1-16)
+		printf "  %s: %d failed, then SUCCESS at %s\n" \
+			"$ip" "$failed" "$time"
+		found=1
+	fi
+done < <(
+	grep -E "Accepted (password|publickey)" "$LOG_FILE" \
+		| grep -oP 'from \K[\d.]+(?= port)' \
+		| sort -u)
+
+	[[ "$found" -eq 0 ]] && printf "    (none found)\n"
+) || true
 
 printf "\n======= End of summary ========\n"
