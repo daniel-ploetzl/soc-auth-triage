@@ -1,6 +1,6 @@
-# soc-auth-triage
+# 🔍 soc-auth-triage
 
-Authentication log analysis script for security inspection. Identifies failed login attempts, potential brute-force patterns, and compromised accounts from system authentication logs.
+Authentication log analysis tool (Bash, Linux) for security assessment
 
 ## Usage
 ```bash
@@ -17,12 +17,12 @@ sudo journalctl -u ssh --since "24 hours ago" > /tmp/ssh.log
 
 ## What it does
 
-- Shows top source IPs attempting failed SSH logins
-- Lists targeted usernames (including invalid users)
-- Displays attack timeline by hour (identifies attack patterns)
-- **Detects potential compromises** (IPs with failed attempts that later succeeded)
-- Works with modern systemd and legacy syslog formats
-
+- Identifies top source IPs attempting failed SSH logins
+- Lists targeted usernames, including invalid users
+- Displays attack timelines by hour to highlight patterns
+- Detects potential compromises (IPs with failed attempts followed by success)
+- Supports both systemd journal and legacy syslog formats
+ 
 ## Output Example (Production VPS)
 ```
 ========== soc-auth-triage ===========
