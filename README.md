@@ -1,6 +1,6 @@
 # soc-auth-triage
 
-Authentication log analysis script for security inspection. Identifies failed login attempts, potential brute-force patterns, and compromised accounts from system authentication logs.
+Authentication log analysis script for security assessment. Identifies failed login attempts, potential brute-force patterns, attack timing and potential compromises.
 
 ## Usage
 ```bash
@@ -10,18 +10,22 @@ Authentication log analysis script for security inspection. Identifies failed lo
 # Analyze specific log file
 ./soc-auth-triage.sh <path_to_log_file>
 
-# For systemd-only logging (no /var/log/auth.log)
+# Compressed logs (rotated files)
+./soc-auth-triage.sh /var/log/auth.log.1.gz
+
+# Systemd-only systems
 sudo journalctl -u ssh --since "24 hours ago" > /tmp/ssh.log
 ./soc-auth-triage.sh /tmp/ssh.log
 ```
 
-## What it does
+## Features
 
-- Shows top source IPs attempting failed SSH logins
-- Lists targeted usernames (including invalid users)
-- Displays attack timeline by hour (identifies attack patterns)
-- **Detects potential compromises** (IPs with failed attempts that later succeeded)
-- Works with modern systemd and legacy syslog formats
+- Top source IPs with failed login attempts
+- Most targeted usernames (including invalid users)
+- Hourly attack timeline
+- Potential compromises (failed attempts -> successful login)
+- Supports compressed logs (.gz, .bz2)
+- Handles both RFC3339 and legacy syslog formats
 
 ## Output Example (Production VPS)
 ```
@@ -71,76 +75,45 @@ Log file: /var/log/auth.log
 
 ## How it works
 
-Uses grep with basic regex to extract patterns from authentication logs. Correlates failed and successful login events to identify potential security incidents.
+Extracts patterns from auth logs using `grep/cut/sed`, then correlates failed and successful logins.
 
-**Detection patterns:**
-- **Failed attempts (modern):** `Connection closed by authenticating user ... [preauth]`
-- **Failed attempts (legacy):** `Failed password for ... from ...`
+- **Failed attempts (modern):** `Failed password` or `Connection closed ... [preauth]`
 - **Successful logins:** `Accepted password` or `Accepted publickey`
 
-**Extraction approach:**
-- **IP extraction:** `grep -o 'from [0-9.]*' | cut -d' ' -f2` - simple grep and cut
-- **Username extraction:** Handles both modern and legacy format with alternation
-- **Timestamp rounding:** `cut -c1-16 | sed 's/:...*/:00/'` - extract first 16 chars, round to hour
-
-**Correlation logic:**
-1. Extract IPs with successful logins
-2. Check each IP for prior failed attempts
-3. Report IPs that failed then succeeded (potential compromise)
-4. Uses process substitution to avoid subshell variable issues
-
-All sections use consistent simple tools: grep, cut, sed, sort, uniq, awk.
+**Correlation logic:** For each IP with successful login, check for prior failed attempts.
 
 ## System Compatibility
 
-### Modern Linux (2015+) - Primary Target
-- Ubuntu 16.04+, Debian 8+, Rocky Linux, Fedora, Arch
-- Uses RFC3339 timestamps: `2026-01-18T00:00:11.966856+01:00`
-- Log location: `/var/log/auth.log` or `/var/log/secure`
+**Tested on:**
+- Ubuntu 22.04/24.04, Debian 12 (RFC3339 timestamps)
+- Legacy syslog format systems
+- Compressed logs (.gz, .bz2)
 
-### Legacy Systems
-- Older Ubuntu/Debian, BSD, custom rsyslog configs
-- Uses syslog timestamps: `Jan 18 00:00:11`
-- Script handles both formats automatically
+**Log locations:**
+- `/var/log/auth.log` (Debian/Ubuntu)
+- `/var/log/secure` (RHEL/Rocky/AlmaLinux)
 
-### Systemd-only logging
-Some minimal cloud/container images don't write to `/var/log/auth.log`. Export logs first:
-```bash
-sudo journalctl -u ssh --since "24 hours ago" > /tmp/ssh.log
-./soc-auth-triage.sh /tmp/ssh.log
-```
+## Requirements
 
-## Testing
+- Bash 4.0+
+- GNU grep (Perl regex support)
+- Standard Linux tools: `sed, cut, awk, uniq, sort`
+- gzip/bzip2 (for compressed logs - standard on all Linux systems)
 
-Tested on:
-- Ubuntu 24.04 LTS (RFC3339 format)
-- Ubuntu 22.04 LTS (RFC3339 format)
-- Debian 12 (RFC3339 format)
-- Sample legacy syslog data
-```bash
-./soc-auth-triage.sh samples/auth.log
-```
+## Limitations
 
-## Known limitations
-
-- Requires GNU grep (not available on macOS/BSD by default - use `brew install grep`)
-- No support for compressed logs (`.gz` files) - decompress first
-- Currently focuses on SSH authentication events only
-- IPv6 addresses not tested
-- Correlation assumes chronological log order
+- SSH events only (no sudo/su/pam)
+- IPv6 not tested
+- Assumes chronological log order
 
 ## What I learned
 
-- Modern Linux uses RFC3339 timestamps, not traditional syslog format
-- Systemd can log to files OR journalctl-only (system-dependent)
-- fail2ban blocks attempts before they log as "Failed password"
-- Pattern matching must handle "Connection closed... [preauth]" for modern systems
-- Correlating different event types requires simple iteration with process substitution
-- Process substitution `< <(...)` avoids subshell variable scope issues
-- Successful logins after failures indicate potential brute-force success
-- Simple tools (grep, cut, sed) are often clearer than complex regex
-- Single sed pattern `s/:...*/:00/` works for both timestamp formats
-- `grep -c` is cleaner than piping to `wc -l`
+- Modern Linux uses RFC3339 timestamps (`2026-02-09T00:00:11+01:00`)
+- fail2ban blocks before "Failed password" gets logged
+- logrotate compresses with gzip, not tar
+- `zcat`/`bzcat` decompress to stdout (no temp files)
+- Process substitution `< <(...)` avoids subshell scope issues
+- Simple sed `s/:...*/:00/` rounds timestamps for both formats
 
 ## TODO
 
@@ -149,7 +122,7 @@ Tested on:
 - [x] Implement timestamp-based attack clustering
 - [x] Successful login correlation (failed → success = potential breach)
 - [x] Document journalctl export workaround for systemd-only systems
-- [ ] Support compressed log files (`.gz`, `.bz2`)
+- [x] Support compressed log files (`.gz`, `.bz2`)
 - [ ] Export results to JSON/CSV format for reporting
 - [ ] Add GeoIP lookup for source IPs
 - [ ] IPv6 support

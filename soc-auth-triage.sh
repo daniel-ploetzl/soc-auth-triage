@@ -4,11 +4,12 @@
 #
 # Purpose:
 #   Authentication log analysis for security inspection. Identifies failed login
-#   attempts, brute-force patterns, attack timing, and potential compromises.
+#   attempts, brute-force patterns, attack timing and potential compromises.
 #
 # Usage:
 #   ./soc-auth-triage.sh                  # analyzes /var/log/auth.log
 #   ./soc-auth-triage.sh <path-to-log>    # analyzes specified log file
+#   ./soc-auth-triage.sh auth.log.gz      # supports compressed files
 #
 # Output:
 #   - Top source IPs attempting failed SSH logins
@@ -17,9 +18,8 @@
 #   - Potential compromises (IPs with failed attempts that later succeeded)
 #
 # Technical Notes:
-#   Uses grep -P (Perl regex) for pattern extraction. Requires GNU grep.
+#   Supports gzip (.gz) and bzp2 (.bz2) compressed logs.
 #   Handles both RFC3339 (systemd/modern) and traditional syslog timestamps.
-#   For systemd-only logging: export first with 'journalctl -u ssh > ssh.log'
 #
 set -euo pipefail
 
@@ -29,6 +29,17 @@ LOG_FILE="${1:-/var/log/auth.log}"
 if [[ ! -r "$LOG_FILE" ]]; then
 	printf "Error: Cannot read log file: %s\n" "$LOG_FILE" >&2
 	exit 1
+fi
+
+# Detect compression and set appropriate reader
+# gzip: .gz files (most common via logrotate)
+# bzip2: .bz2 files (less common but supported)
+if [[ "$LOG_FILE" =~ \.gz$ ]]; then
+	CAT_CMD="zcat"
+elif [[ "$LOG_FILE" =~ \.bz2$ ]]; then
+	CAT_CMD="bzcat"
+else
+	CAT_CMD="cat"
 fi
 
 printf "\n======= soc-auth-triage =======\n"
@@ -42,7 +53,8 @@ printf "[*] Top failed SSH source IPs:\n"
 # Modern (systemd): Connection closed by authenticating user root IP port [preauth]
 # Legacy: Failed password for root from IP
 (
-	grep -E "(Failed password|Connection closed by authenticating user.*\[preauth\])" "$LOG_FILE" \
+	$CAT_CMD "$LOG_FILE" \
+		|grep -E "(Failed password|Connection closed by authenticating user.*\[preauth\])" \
 		| grep -oP '(from |user \w+ )\K[\d.]+(?= port)' \
 		| sort | uniq -c | sort -nr | head -n "$TOP_N" \
 		| awk '{printf "  %s: %d attempt(s)\n", $2, $1}'
@@ -53,7 +65,8 @@ printf "\n[*] Top targeted usernames:\n"
 # Modern: authenticating user USERNAME
 # Legacy: for [invalid user] USERNAME from
 (
-	grep -E "(Failed password|Connection closed by authenticating user.*\[preauth\])" "$LOG_FILE" \
+	$CAT_CMD "$LOG_FILE" \
+		| grep -E "(Failed password|Connection closed by authenticating user.*\[preauth\])" \
 		| grep -oP '(for (?:invalid user )?|authenticating user )\K\w+(?= )' \
 		| sort | uniq -c | sort -nr | head -n "$TOP_N" \
 		| awk '{printf "  %s: %d attempt(s)\n", $2, $1}'
@@ -62,7 +75,8 @@ printf "\n[*] Top targeted usernames:\n"
 printf "\n[*] Attack timeline (by hour):\n"
 # Extract timestamp and round to hour
 (
-	grep -E "(Failed password|Connection closed.*\[preauth\])" "$LOG_FILE" \
+	$CAT_CMD "$LOG_FILE" \
+		| grep -E "(Failed password|Connection closed.*\[preauth\])" \
 		| cut -c1-16 \
 		| sed 's/:...*/:00/' \
 		| sort | uniq -c | sort -nr | head -n "$TOP_N" \
@@ -78,26 +92,29 @@ printf "\n[*] Potential compromises (failed then successful login):\n"
 	while read -r ip; do
 		# Count failed attempts from this IP
 		failed=$(
-			grep -E "(Failed password|Connection closed.*\[preauth\])" \
-				"$LOG_FILE" \
+			$CAT_CMD "$LOG_FILE" \
+				| grep -E "(Failed password|Connection closed.*\[preauth\])" \
 				| grep -c "$ip" \
-				# | grep "$ip" \
-				# | wc -l
-	)
+		)
 
-	if [[ "$failed" -gt 0 ]]; then
-		# Get timestamp from successful login (first 16 chars)
-		time=$(grep -E "Accepted.*from $ip" "$LOG_FILE" \
-			| head -1 \
-			| cut -c1-16)
-		printf "  %s: %d failed, then SUCCESS at %s\n" \
-			"$ip" "$failed" "$time"
-		found=1
-	fi
-done < <(
-	grep -E "Accepted (password|publickey)" "$LOG_FILE" \
-		| grep -oP 'from \K[\d.]+(?= port)' \
-		| sort -u)
+		if [[ "$failed" -gt 0 ]]; then
+			# Get timestamp from successful login (first 16 chars)
+			time=$(
+				$CAT_CMD "$LOG_FILE" \
+				| grep -E "Accepted.*from $ip" \
+				| head -1 \
+				| cut -c1-16
+			)
+			printf "  %s: %d failed, then SUCCESS at %s\n" \
+				"$ip" "$failed" "$time"
+			found=1
+		fi
+	done < <(
+		$CAT_CMD "$LOG_FILE" \
+			| grep -E "Accepted (password|publickey)" \
+			| grep -oP 'from \K[\d.]+(?= port)' \
+			| sort -u
+	)
 
 	[[ "$found" -eq 0 ]] && printf "    (none found)\n"
 ) || true
